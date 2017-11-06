@@ -104,6 +104,8 @@ const char *http_request_line(int fd, char *reqpath, char *env, size_t *env_len)
     /* decode URL escape sequences in the requested path into reqpath */
     url_decode(reqpath, sp1);
 
+    printf("url_decode() reqpath:%s\tsp1:%s\n", reqpath, sp1);
+
     envp += sprintf(envp, "REQUEST_URI=%s", reqpath) + 1;
 
     envp += sprintf(envp, "SERVER_NAME=zoobar.org") + 1;
