@@ -58,6 +58,11 @@ int main(int argc, char **argv)
     }
 }
 
+
+/**
+ * BUG:
+ * reqpath[]
+ */
 static void process_client(int fd)
 {
     static char env[8192];  /* static variables are not on the stack */

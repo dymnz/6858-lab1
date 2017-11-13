@@ -27,6 +27,9 @@ void touch(const char *name) {
         close(fd);
 }
 
+/**
+ * Null-terminating `buf` at `buf[size-1]`
+ */
 int http_read_line(int fd, char *buf, size_t size)
 {
     size_t i = 0;
@@ -60,7 +63,11 @@ int http_read_line(int fd, char *buf, size_t size)
 
     return -1;
 }
-
+/**
+ * BUG:
+ * Called at `process_client()` in zookd, with `reqpath[2048]`.
+ * However, the 2048 character limit is not enforced here.
+ */
 const char *http_request_line(int fd, char *reqpath, char *env, size_t *env_len)
 {
     static char buf[8192];      /* static variables are not on the stack */
@@ -72,39 +79,59 @@ const char *http_request_line(int fd, char *reqpath, char *env, size_t *env_len)
     if (http_read_line(fd, buf, sizeof(buf)) < 0)
         return "Socket IO error";
 
+    printf("http_request_line() raw-buf:%s\n", buf);
+
     /* Parse request like "GET /foo.html HTTP/1.0" */
+    // Splicing the "GET" or "POST"
     sp1 = strchr(buf, ' ');
     if (!sp1)
         return "Cannot parse HTTP request (1)";
     *sp1 = '\0';
+
+    printf("http_request_line() buf-sp1-splice:%s\n", buf);
+
     sp1++;
     if (*sp1 != '/')
         return "Bad request path";
 
+    // Splicing the string after request path
     sp2 = strchr(sp1, ' ');
     if (!sp2)
         return "Cannot parse HTTP request (2)";
     *sp2 = '\0';
+
     sp2++;
+
+    printf("http_request_line() buf-sp1+-splice:%s\n", sp1);
+    printf("http_request_line() buf-sp2-splice:%s\n", sp2);
+    // http_request_line() raw buf:GET /zoobar/index.cgi/login?nexturl=http://172.18.24.79:8080/zoobar/index.cgi/ HTTP/1.1
+    // http_request_line() buf-sp1-splice:GET
+    // http_request_line() sp1-sp2-splice:/zoobar/index.cgi/login?nexturl=http://172.18.24.79:8080/zoobar/index.cgi/
+    // http_request_line() sp2-end-splice:HTTP/1.1
+    // http_request_line() sp1-qp-splice:nexturl=http://172.18.24.79:8080/zoobar/index.cgi/
+
 
     /* We only support GET and POST requests */
     if (strcmp(buf, "GET") && strcmp(buf, "POST"))
         return "Unsupported request (not GET or POST)";
 
-    envp += sprintf(envp, "REQUEST_METHOD=%s", buf) + 1;
-    envp += sprintf(envp, "SERVER_PROTOCOL=%s", sp2) + 1;
+    envp += sprintf(envp, "REQUEST_METHOD=%s", buf) + 1;    // "GET" "POST"
+    envp += sprintf(envp, "SERVER_PROTOCOL=%s", sp2) + 1;   // "HTTP/1.1"
 
     /* parse out query string, e.g. "foo.py?user=bob" */
+    // Can't find where 'QUERY_STRING' is used?
     if ((qp = strchr(sp1, '?')))
     {
         *qp = '\0';
-        envp += sprintf(envp, "QUERY_STRING=%s", qp + 1) + 1;
+        envp += sprintf(envp, "QUERY_STRING=%s", qp + 1) + 1;   // nexturl=http://172.18.24.79:8080/zoobar/index.cgi/
+        printf("http_request_line() sp1-qp-splice:%s\n", qp + 1);
     }
 
     /* decode URL escape sequences in the requested path into reqpath */
     url_decode(reqpath, sp1);
 
     printf("url_decode() reqpath:%s\tsp1:%s\n", reqpath, sp1);
+    // reqpath:/zoobar/index.cgi/login   sp1:/zoobar/index.cgi/login
 
     envp += sprintf(envp, "REQUEST_URI=%s", reqpath) + 1;
 
@@ -163,7 +190,7 @@ const char *http_request_headers(int fd)
         /* Store header in env. variable for application code */
         /* Some special headers don't use the HTTP_ prefix. */
         if (strcmp(buf, "CONTENT_TYPE") != 0 &&
-            strcmp(buf, "CONTENT_LENGTH") != 0) {
+                strcmp(buf, "CONTENT_LENGTH") != 0) {
             sprintf(envvar, "HTTP_%s", buf);
             setenv(envvar, value, 1);
         } else {
@@ -477,7 +504,7 @@ void env_deserialize(const char *env, size_t len)
             break;
         *p++ = 0;
         setenv(env, p, 1);
-        p += strlen(p)+1;
+        p += strlen(p) + 1;
         len -= (p - env);
         env = p;
     }
